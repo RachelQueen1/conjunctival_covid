@@ -1,0 +1,95 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+
+
+
+
+```{r}
+library(readxl)
+library(annotables)
+library(dplyr)
+library("Seurat")
+library(ggplot2)
+
+superficial <- read_excel("highRes/Table 6.xlsx", sheet = "superficial conjunctival epith") %>% rename(symbol = Gene) %>% left_join(grch38) %>% filter(grepl("okine", description))
+
+progenitors <- read_excel("highRes/Table 6.xlsx", sheet = "conjunctival epith progenitors") %>% rename(symbol = Gene) %>% left_join(grch38) %>% filter(grepl("okine", description))
+
+
+basal <- read_excel("highRes/Table 6.xlsx", sheet = "basal conjunctival epith") %>% rename(symbol = Gene) %>% left_join(grch38) %>% filter(grepl("okine", description))
+
+```
+```{r}
+theme_set(
+    theme_classic(base_size = 25)
+)
+
+
+cornea_theme <- cowplot::theme_cowplot() +theme(plot.title = element_text(size=20), 
+                                       axis.title.x = element_text(size=20),
+                                       axis.title.y = element_text(size=20),
+                                       axis.text=element_text(size=18),
+                                       axis.text.x= element_text(size = 18, angle = 45, hjust = 1), 
+                                       axis.text.y= element_text(size = 18),
+                                       #legend.text = element_text(size = 16),
+                                       #legend.title=element_text(size=20),
+                                       #plot.caption=element_text(size=18), 
+                                       #plot.subtitle = element_text(size = 16), 
+                                       #axis.ticks = element_blank(), 
+                                       strip.text = element_text(size = 0)
+                                      )
+```
+```{r}
+#sampleInfo <- readRDS("rObjects/sampleInfo.rds")
+seuratObj <- readRDS("rObjects/seuratObj_C16_C10_C15_D33.rds")
+annotations <- read.csv("annotations/infected_unininfected.csv")[,2:3]
+colnames(annotations) <- c("Cluster", "Annotation")
+annotations$Cluster <- factor(annotations$Cluster)
+
+seuratObj$annotation <- annotations$Annotation[match(seuratObj$RNA_snn_res.2.2, annotations$Cluster)]
+
+annotations
+
+
+plot_cols <- c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00')
+names(plot_cols) <- annotations$Annotation %>% unique()
+#saveRDS(plot_cols, "rObjects/plot_cols_conjunctiva.rds")
+
+```
+
+```{r}
+seuratObj$annotation_group <- paste(seuratObj$annotation, seuratObj$group, sep = ": ")
+seuratObj$annotation_group  <- gsub("unexposed_uninfected", "unexposed", seuratObj$annotation_group)
+
+
+#familyGenes <- c("HPN", "TMPRSS2", "TMPRSS3", "TMPRSS4", "TMPRSS5","MSPL","TMPRSS15", "ACE1", "ACE2")
+
+gene_list <- c(superficial$symbol,  progenitors$symbol, basal$symbol) %>% unique()
+p2 <- DotPlot(seuratObj, 
+              features = rev(gene_list), 
+              cols = c("blue", "red"), 
+              col.min = 0, 
+              col.max = 2.5,
+              group.by = "annotation_group") 
+
+
+p2$data %>%  
+  dplyr::filter(pct.exp > 0 ) %>%   
+  ggplot(aes(x= features.plot, y = id, color = avg.exp.scaled, size = pct.exp)) + 
+  geom_point() +
+  ylab('') +
+  xlab('') + 
+  scale_colour_gradient(low = "blue", high = "red") + 
+  cornea_theme +
+  scale_radius(range = c(0, 5)) +  
+   ggsave("highRes/chemokines_cytokines.tiff", width = 43, height = 20, units = "cm", dpi = 300)
+
+
+```

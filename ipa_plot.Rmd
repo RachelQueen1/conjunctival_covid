@@ -1,0 +1,78 @@
+---
+title: "IPA pathways"
+output: html_notebook
+---
+ 
+
+```{r}
+library(ggplot2)
+```
+
+```{r}
+library(RColorBrewer)
+library(dplyr)
+pathfiles <- list.files("IPA")
+
+
+plotList <- list()
+
+  for (i in 1:length(pathfiles)){
+  pathway_name <- gsub("_pathways.txt", "", pathfiles[i])
+  pathway <- read.csv(file.path("IPA", pathfiles[i]), skip = 2, sep = "\t")
+  colnames(pathway)[2] <- "log.p.value"
+  pathway$p.value <- 10^(-pathway$log.p.value)
+  pathway <- pathway %>% top_n(n = 20, wt = log.p.value)
+  #number_pathways[i] <- nrow(pathway)
+  
+   
+  
+  
+  
+  my_colours <- colorRampPalette(brewer.pal(8, "Dark2"))(nrow(pathway))
+  
+  
+  plotList[[i]] <- ggplot(pathway, aes(log.p.value, stringr::str_wrap(Ingenuity.Canonical.Pathways, 50), 
+                                      color = Ingenuity.Canonical.Pathways)) + 
+    geom_point() +
+    scale_color_manual(values = my_colours) + 
+    theme_classic() + 
+    theme(legend.position = "none") + 
+    geom_vline(xintercept = -log10(0.05), linetype="dotted") +
+    geom_vline(xintercept = -log10(0.01), linetype="dotted") +
+    xlim(0,12) +     
+    ggtitle(label = pathway_name) + ylab("")  + ggsave(paste0("highRes/IPA_cannonical_pathway_",
+                                                   pathway_name, 
+                                                   ".tiff"), 
+                                            width = 9, 
+                                            height = 10, 
+                                            limitsize = FALSE)
+  
+    }
+
+plotList[[4]] 
+plotList[[2]] + coord_flip()
+p_all <- ggpubr::ggarrange(plotList[[4]],
+  plotList[[1]], 
+                           plotList[[2]], 
+                           plotList[[3]], 
+                            
+                           ncol=1, 
+                           heights = number_pathways)
+ggsave("highRes/IPA_cannonical_pathway.tiff", height = 28)
+
+
+
+
+
+
+
+plotList[[1]] + ggsave(paste0("highRes/IPA_cannonical_pathway_", gsub("_pathways.txt", "", pathfiles[1]), ".tiff"))
+
+
+
+
+  
+
+
+```
+

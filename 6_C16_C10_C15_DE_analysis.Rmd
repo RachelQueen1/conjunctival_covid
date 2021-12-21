@@ -1,0 +1,292 @@
+---
+title: "C16, C10, C15 Differential Expression"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, libraries}
+library(harmony)
+library(Seurat)
+library(cowplot)
+library(SCFunctionsV3)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(tidyverse)
+library(DoubletFinder)
+library(pheatmap)
+library(ggplot2)
+```
+
+
+```{r}
+#sampleInfo <- readRDS("rObjects/sampleInfo.rds")
+seuratObj <- readRDS("rObjects/seuratObj_C16_C10_C15_D33.rds")
+```
+
+
+The clusters were grouped into conj_basal, conj_superficial, epithelial_progenitors, fibroblasts:
+
+```{r}
+# annotations <- read.csv("annotations/C16_C10_C15_D33_infected_and_non_infected.csv") %>% select("cluster", "cell.annotation") %>% 
+#   distinct()
+
+
+annotations <- read.csv("annotations/infected_unininfected.csv")[,2:3]
+colnames(annotations) <- c("Cluster", "Annotation")
+annotations$Cluster <- factor(annotations$Cluster)
+
+seuratObj$annotation <- annotations$Annotation[match(seuratObj$RNA_snn_res.2.2, annotations$Cluster)]
+
+annotations
+
+write.csv(annotations, "annotations/conjuntiva_infected_uninfected.csv")
+
+```
+
+
+# percentage of cells in each cluster
+```{r}
+percentages <- seuratObj$annotation %>% table() %>% data.frame()
+percentages$percent_cluster <- percentages$Freq/dim(seuratObj)[2] * 100
+percentages
+```
+
+
+
+```{r}
+plot_cols <- readRDS("../rObjects/plot_cols_conjunctiva.rds")
+p0 <- DimPlot(seuratObj,  label = TRUE)
+
+p1 <- DimPlot(seuratObj,  group.by = "annotation", cols = plot_cols) 
+
+
+
+p1 + ggsave("highRes/UMAP_annotations_C16_C10_C15.tiff", width = 8, height = 4)
+```
+
+```{r}
+covid_genes <- readRDS("rObjects/covid_genes.rds")
+covid_genes <- intersect(covid_genes, rownames(seuratObj))
+cornea_genes <-  c("krt4",  "muc4", "muc1",
+"krt14","tp63", "krt23", "col4a5",
+"krt13", "krt19",
+"acta2", "COL1A1",
+"ace2", "tmprss2") %>% toupper()
+genes <- covid_genes
+genes <- c(covid_genes, cornea_genes)
+
+for (i in 1:length(genes)){
+  gene <- genes[i]
+  
+  p1 <- FeaturePlot(seuratObj, features = gene,  
+                    min.cutoff = "q1", 
+                    cols = c("#E5E5E5", "#FF0000"), 
+                    label = FALSE, 
+                    order = TRUE, 
+                    label.size = 2,
+                    repel = TRUE,
+                    pt.size = 1
+                    ) + 
+    theme(panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        text = element_text(size=10))  
+    
+    p1 + ggsave(paste0("highRes/expression_plot_",                                                                          gene, 
+                                                       "_C16_C10_C15.tiff"), 
+                                                                         width = 6, height = 4)
+
+  
+  
+  
+}
+```
+
+
+## Markers
+
+DE analysis was then performed between infected and uninfected cells within each cell type. 
+
+```{r, eval = FALSE}
+seuratObj$condition <- ifelse(seuratObj$condition == "positive", yes = "exposed", no = "unexposed")
+seuratObj <- SetIdent(seuratObj, value = "condition")
+
+markers_conj_superficial <- FindAllMarkers(seuratObj[,
+                                    seuratObj$annotation == "superficial conjunctival epithelium"], 
+               only.pos = TRUE)
+
+
+markers_conj_basal <- FindAllMarkers(seuratObj[,
+                                    seuratObj$annotation == "basal conjunctival epithelium"], 
+               only.pos = TRUE)
+
+
+markers_epithelial_progenitors <- FindAllMarkers(seuratObj[,
+                                    seuratObj$annotation == "conjunctival epithelial progenitors"], 
+               only.pos = TRUE)
+
+
+markers_fibroblasts <- FindAllMarkers(seuratObj[,
+                                    seuratObj$annotation == "fibroblasts"], 
+               only.pos = TRUE)
+
+
+write.csv(markers_conj_superficial, "csvFiles/markers_conj_superficial.csv")
+write.csv(markers_conj_basal, "csvFiles/markers_conj_basal.csv")
+write.csv(markers_epithelial_progenitors, "csvFiles/markers_epithelial_progenitors.csv")
+write.csv(markers_fibroblasts, "csvFiles/fibroblasts.csv")
+```
+
+
+```{r}
+covid_exp <- seuratObj@assays$RNA@counts[covid_genes, ]
+seuratObj$nCount_Covid_Genes <- colSums(covid_exp)
+seuratObj$nGenes_Covid_Genes <- colSums(covid_exp > 0)
+
+nGenes_Covid_Genes <- seuratObj$nGenes_Covid_Genes %>% table() %>% data.frame() 
+colnames(nGenes_Covid_Genes) <- c("Number_Genes_Expressed", "Number_Cells")
+
+
+nCount_Covid_Genes <- seuratObj$nCount_Covid_Genes %>% table() %>% data.frame() 
+colnames(nCount_Covid_Genes) <- c("Number_Counts", "Number_Cells")
+
+write.csv(nCount_Covid_Genes, "csvFiles/number_counts_covid_genes.csv")
+write.csv(nGenes_Covid_Genes, "csvFiles/number_genes_covid_genes.csv")
+
+
+p1 <- FeatureScatter(seuratObj, 
+                     feature1 = "nGenes_Covid_Genes", 
+                     feature2 = "nCount_Covid_Genes", 
+                     group.by = "annotation", 
+                     plot.cor = FALSE) + facet_wrap(~colors) + theme_classic()
+p1 + ggsave("images/number_covid_genes.png")
+
+
+p1 <- FeatureScatter(seuratObj, 
+                     feature1 = "nGenes_Covid_Genes", 
+                     feature2 = "TMPRSS4", 
+                     group.by = "annotation", 
+                     plot.cor = FALSE) + facet_wrap(~colors) + theme_classic()
+
+
+```
+
+
+
+
+```{r}
+positive_negative <- ifelse(seuratObj$nCount_Covid_Genes > 0, yes = "infected", no = "uninfected")
+seuratObj$sars_cov2_pos <- seuratObj$nCount_Covid_Genes > 0
+
+# infected_uninfected <- ifelse(seuratObj$condition == "positive" , yes = "exposed", no = "unexposed")
+
+seuratObj$group <- paste(seuratObj$condition, positive_negative, sep = "_")
+
+```
+
+```{r, eval = FALSE}
+saveRDS(seuratObj, "rObjects/seuratObj_C16_C10_C15_D33.rds")
+```
+
+
+
+# Relative proportion of infected cell types based on expression of viral spike (S) gene
+
+
+
+```{r}
+exposedCells <- seuratObj[,seuratObj$condition == "exposed"][[]][, c("annotation", "sars_cov2_pos")] %>% 
+  group_by(annotation) %>% 
+  summarise(number_cells = n(),
+            sars_cov2_pos_cells = sum(sars_cov2_pos),
+            infected = sum(sars_cov2_pos)/n() * 100
+            )
+
+
+
+exposedCells$uninfected <- 100 - exposedCells$infected
+
+write.csv(exposedCells, "csvFiles/exposedCells.csv")
+
+exposedCells <- gather(exposedCells, 
+                       Condition, 
+                       percentage_cells, 
+                       infected:uninfected)
+
+ggplot(exposedCells, aes(annotation, percentage_cells, fill = Condition)) + geom_bar(stat = "identity") +  theme_minimal() +  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +   labs(x = "Cell Type", y = "% cells") +  ggsave("highRes/infected_cell_types.tiff", width = 4, height = 4)
+```
+
+```{r, eval = FALSE}
+
+
+seuratObj <- SetIdent(seuratObj, value = "group")
+
+
+
+findMarkersCellType <- function(cellType){
+  sObj <- seuratObj[,seuratObj$annotation == cellType]
+  contrasts = c("exposed_uninfected", "unexposed_uninfected")
+  marker_list <- list()
+  for (i in 1:2){
+    
+    if(sum(sObj$groups == contrasts[i])){
+    markers <- FindMarkers(sObj, 
+                   only.pos = FALSE, 
+                   ident.1 = "exposed_infected",
+                   ident.2 = contrasts[i],
+                                  )
+    
+    write.csv(markers, paste0("csvFiles/", cellType, "_exposed_infected_vs_", contrasts[i], ".csv"))
+    marker_list[[contrasts[i]]] <- markers
+    }
+    
+    
+    }
+
+  return(marker_list)
+}
+
+cep_markers <- findMarkersCellType("conjunctival epithelial progenitors")
+bce_markers <- findMarkersCellType("basal conjunctival epithelium")
+sce_markers <- findMarkersCellType("superficial conjunctival epithelium")
+fibro_markers <- findMarkersCellType("fibroblasts")
+
+
+
+
+### exposed uninfected vs unexposed unifected
+findMarkersCellType <- function(cellType){
+  sObj <- seuratObj[,seuratObj$annotation == cellType]
+  markers <- FindMarkers(sObj, 
+                   only.pos = FALSE, 
+                   ident.1 = "exposed_uninfected",
+                   ident.2 = "unexposed_uninfected",
+                                  )
+    
+    write.csv(markers, paste0("csvFiles/", cellType, "_exposed_uninfected_vs_unexposed_uninfected", ".csv"))
+    
+
+  return(markers)
+}
+
+cep_markers <- findMarkersCellType("conjunctival epithelial progenitors")
+bce_markers <- findMarkersCellType("basal conjunctival epithelium")
+sce_markers <- findMarkersCellType("superficial conjunctival epithelium")
+fibro_markers <- findMarkersCellType("fibroblasts")
+
+
+
+
+
+
+```
+

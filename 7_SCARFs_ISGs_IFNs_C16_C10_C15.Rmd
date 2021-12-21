@@ -1,0 +1,253 @@
+---
+title: "SCARFs, IFNs, ISGs, C16 C1O C15 Day 33 Integration"
+output: html_notebook
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(SCFunctionsV3)
+library(ggplot2)
+library(dplyr)
+library(cowplot)
+```
+
+```{r}
+theme_set(
+    theme_classic(base_size = 25)
+)
+
+
+cornea_theme <- cowplot::theme_cowplot() +theme(plot.title = element_text(size=20), 
+                                       axis.title.x = element_text(size=20),
+                                       axis.title.y = element_text(size=20),
+                                       axis.text=element_text(size=18),
+                                       axis.text.x= element_text(size = 18, angle = 45, hjust = 1), 
+                                       axis.text.y= element_text(size = 18),
+                                       #legend.text = element_text(size = 16),
+                                       #legend.title=element_text(size=20),
+                                       #plot.caption=element_text(size=18), 
+                                       #plot.subtitle = element_text(size = 16), 
+                                       #axis.ticks = element_blank(), 
+                                       strip.text = element_text(size = 0)
+                                      )
+```
+
+```{r}
+#sampleInfo <- readRDS("rObjects/sampleInfo.rds")
+seuratObj <- readRDS("rObjects/seuratObj_C16_C10_C15_D33.rds")
+annotations <- read.csv("annotations/infected_unininfected.csv")[,2:3]
+colnames(annotations) <- c("Cluster", "Annotation")
+annotations$Cluster <- factor(annotations$Cluster)
+
+seuratObj$annotation <- annotations$Annotation[match(seuratObj$RNA_snn_res.2.2, annotations$Cluster)]
+
+annotations
+
+
+plot_cols <- c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00')
+names(plot_cols) <- annotations$Annotation %>% unique()
+#saveRDS(plot_cols, "rObjects/plot_cols_conjunctiva.rds")
+
+```
+
+
+
+
+```{r}
+entry_genes <- read.csv("../csvFiles/entry_genes.csv")
+
+
+
+seuratObj$annotation_group <- paste(seuratObj$annotation, seuratObj$group, sep = ": ")
+seuratObj$annotation_group  <- gsub("unexposed_uninfected", "unexposed", seuratObj$annotation_group)
+
+
+#familyGenes <- c("HPN", "TMPRSS2", "TMPRSS3", "TMPRSS4", "TMPRSS5","MSPL","TMPRSS15", "ACE1", "ACE2")
+
+gene_list <- c(entry_genes$Gene, "BSG") 
+p2 <- DotPlot(seuratObj, 
+              features = rev(gene_list), 
+              cols = c("blue", "red"), 
+              col.min = 0, 
+              col.max = 2.5,
+              group.by = "annotation_group") 
+
+
+
+p2$data %>%  
+  dplyr::filter(pct.exp > 0 ) %>%   
+  ggplot(aes(x= features.plot, y = id, color = avg.exp.scaled, size = pct.exp)) + 
+  geom_point() +
+  ylab('') +
+  xlab('') + 
+  scale_colour_gradient(low = "blue", high = "red") + 
+  cornea_theme +
+  scale_radius(range = c(0, 5)) +  
+  # ggsave("SarsCov2_Figures/entrty_factors.tiff", width = 35, height = 20, units = "cm", dpi = 300) +
+  ggsave("highRes/SCARFS.tiff", width = 43, height = 20, units = "cm", dpi = 300)
+
+p2$data %>% write.csv("csvFiles/scarfs.csv")
+#p2$data %>% write.csv("SarsCov2_Figures/entrty_factors.csv")
+
+```
+
+
+## ISG boxplot
+
+```{r}
+isg_list_short <- read.csv("../ISG_List", header = FALSE)$V1
+
+isg_list_short <- intersect(isg_list_short, rownames(seuratObj@assays$RNA@scale.data))
+
+seuratObj <- AddModuleScore(seuratObj, 
+                            features = isg_list_short, name = "ISG")
+
+
+
+
+
+seuratObj$ISG_mean <- colSums(seuratObj@assays$RNA@data[intersect(isg_list_short, rownames(seuratObj)),])/length(intersect(isg_list_short, rownames(seuratObj)))
+
+
+
+
+#seuratObj$annotation %>% unique()
+p1 <- VlnPlot(seuratObj[,seuratObj$annotation == "superficial conjunctival epithelium"], features = "ISG1",  group.by = "group", pt.size = 0) 
+p2 <-VlnPlot(seuratObj[,seuratObj$annotation == "conjunctival epithelial progenitors"], features = "ISG1",  group.by = "group", pt.size = 0) 
+p3 <- VlnPlot(seuratObj[,seuratObj$annotation == "basal conjunctival epithelium"], features = "ISG1",  group.by = "group", pt.size = 0) 
+p4 <- VlnPlot(seuratObj[,seuratObj$annotation == "fibroblasts"], features = "ISG1",  group.by = "group", pt.size = 0) 
+
+
+
+p = p1
+cellType = "superficial conjunctival epithelium"
+cols <- c("#2596be", "#862120","#34A488")
+avergageBoxPlot <- function(p, cellType){
+dat <- p$data
+ggplot(dat, aes(ident, ISG1, fill = ident)) + 
+   geom_boxplot() +
+   theme_minimal() +   labs(x = "Group", 
+                            y = "IGS Average Expression") + 
+  NoLegend() + 
+  ggtitle(cellType) + 
+  scale_fill_manual(values = cols)
+}
+
+
+
+p1b <- avergageBoxPlot(p1, "Superficial conjunctival epithelium")
+p2b <- avergageBoxPlot(p2, "Conjunctival epithelial progenitors")
+p3b <- avergageBoxPlot(p3, "Basal conjunctival epithelium")
+p4b <- avergageBoxPlot(p4, "Fibroblasts")
+
+p1b + p2b + p3b + p4b +   ggsave("highRes/ISG_boxplot.tiff", width = 8, height = 6)
+
+p1b + p2b + p3b + p4b +   ggsave("highRes/ISG_boxplot.png", width = 8, height = 6)
+```
+
+
+## IL17 boxplot
+
+```{r}
+il17 <- read.csv("csvFiles/IL17_genes", header = FALSE)$V1
+
+il17 <- intersect(il17, rownames(seuratObj@assays$RNA@scale.data)) %>% list()
+
+seuratObj <- AddModuleScore(seuratObj, 
+                            features = il17, name = "il17_")
+
+
+
+
+
+# seuratObj$ISG_mean <- colSums(seuratObj@assays$RNA@data[intersect(isg_list_short, rownames(seuratObj)),])/length(intersect(isg_list_short, rownames(seuratObj)))
+
+
+
+
+#seuratObj$annotation %>% unique()
+p1 <- VlnPlot(seuratObj[,seuratObj$annotation == "superficial conjunctival epithelium"], features = "il17_1",  group.by = "group", pt.size = 0) 
+p2 <-VlnPlot(seuratObj[,seuratObj$annotation == "conjunctival epithelial progenitors"], features = "il17_1",  group.by = "group", pt.size = 0) 
+p3 <- VlnPlot(seuratObj[,seuratObj$annotation == "basal conjunctival epithelium"], features = "il17_1",  group.by = "group", pt.size = 0) 
+p4 <- VlnPlot(seuratObj[,seuratObj$annotation == "fibroblasts"], features = "il17_1",  group.by = "group", pt.size = 0) 
+
+
+
+p = p1
+cellType = "superficial conjunctival epithelium"
+cols <- c("#2596be", "#862120","#34A488")
+avergageBoxPlot <- function(p, cellType){
+dat <- p$data
+ggplot(dat, aes(ident, il17_1, fill = ident)) + 
+   geom_boxplot() +
+   theme_minimal() +   labs(x = "Group", 
+                            y = "IL17 Average Expression") + 
+  NoLegend() + 
+  ggtitle(cellType) + 
+  scale_fill_manual(values = cols)+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+}
+
+
+
+p1b <- avergageBoxPlot(p1, "Superficial conjunctival epithelium")
+p2b <- avergageBoxPlot(p2, "Conjunctival epithelial progenitors")
+p3b <- avergageBoxPlot(p3, "Basal conjunctival epithelium")
+p4b <- avergageBoxPlot(p4, "Fibroblasts")
+
+p1b + p2b + p3b + p4b +   ggsave("highRes/il17_boxplot.tiff", width = 8, height = 10)
+
+p1b + p2b + p3b + p4b +   ggsave("highRes/ISG_boxplot.png", width = 8, height = 10)
+```
+
+
+
+
+
+
+## Heatmap of ISG expression
+
+```{r}
+isg_list_short <- read.csv("../ISG_List", header = FALSE)$V1
+
+isg_list_short <- intersect(isg_list_short, rownames(seuratObj@assays$RNA@scale.data))
+
+tmp <- seuratObj@assays$RNA@scale.data[isg_list_short,]
+
+tmp <- tmp %>% data.frame() %>%  t() %>% data.frame()
+
+
+
+
+
+tmp$group <- seuratObj$group
+tmp$annotation <- seuratObj$annotation
+tmp$annotation_group <- paste(tmp$group, 
+                              tmp$annotation, 
+                              sep = "_")
+
+data_long <- gather(tmp, gene, expression, isg_list_short)
+
+data_long$group <- gsub("_", ",", data_long$group)
+
+p1 <- ggplot(data_long, aes(gene, group, fill = expression)) + 
+  geom_tile() +
+  scale_fill_steps2(
+  low = "#00eaff",
+  high = "#ff0000",
+  mid = "white", 
+  midpoint = 0) + 
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
+  facet_wrap(~annotation, ncol = 1) + labs(x = "", y = "")
+
+p1 + ggsave("highRes/ISG_heatmap.tiff", width = 12, height = 6)
+
+```
+
+

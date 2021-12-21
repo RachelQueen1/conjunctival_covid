@@ -1,0 +1,70 @@
+---
+title: "Infected_Bystander_Mock_Violin_Plots"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, libraries}
+library(harmony)
+library(Seurat)
+library(cowplot)
+library(SCFunctionsV3)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(tidyverse)
+library(DoubletFinder)
+library(pheatmap)
+library(ggplot2)
+```
+
+
+```{r}
+#sampleInfo <- readRDS("rObjects/sampleInfo.rds")
+seuratObj <- readRDS("rObjects/seuratObj_C16_C10_C15_D33.rds")
+seuratObj$sample <- paste(seuratObj$cell_line, seuratObj$condition, sep = "_")
+```
+
+
+```{r}
+plotCols <- c("#862120", "#2596be", "#34A488")
+seuratObj$toPlot <- "mock-infected"
+
+filter <- seuratObj$condition == "exposed"
+
+seuratObj$toPlot[filter] <- ifelse(seuratObj$sars_cov2_pos[filter], 
+       yes = "infected",
+       no = "bystander")
+
+
+seuratObj <- SetIdent(seuratObj, value = "toPlot")
+
+#### Plot function
+VlnPlotGenes <- function(cellType, genes){
+  ct <- gsub(" ", "_", cellType)
+  sObj <- seuratObj[,seuratObj$annotation == cellType]
+  
+  for (gene in genes){
+    
+    VlnPlot(sObj, features = gene, pt.size = 0, cols = plotCols) + ggsave(paste0("highRes/VlnPlots/vlnPlot_",ct, "_", gene, ".tiff"))
+}}
+
+
+#### Plot Violins
+VlnPlotGenes(cellType = "superficial conjunctival epithelium",
+             genes = c("CXCL5", "CXCL6", "SLC26A4", "SLC40A1", "WFDC2"))
+
+VlnPlotGenes(cellType = "basal conjunctival epithelium",
+             genes = c("FGD6"))
+
+VlnPlotGenes(cellType = "fibroblasts",
+             genes = c("RGP1", "TRIM16L"))
+
+
+
+```
+

@@ -1,0 +1,116 @@
+---
+title: "NFKB boxplot"
+output: html_notebook
+---
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(SCFunctionsV3)
+library(ggplot2)
+library(dplyr)
+library(cowplot)
+```
+
+```{r}
+theme_set(
+    theme_classic(base_size = 25)
+)
+
+
+cornea_theme <- cowplot::theme_cowplot() +theme(plot.title = element_text(size=20), 
+                                       axis.title.x = element_text(size=20),
+                                       axis.title.y = element_text(size=20),
+                                       axis.text=element_text(size=18),
+                                       axis.text.x= element_text(size = 18, angle = 45, hjust = 1), 
+                                       axis.text.y= element_text(size = 18),
+                                       #legend.text = element_text(size = 16),
+                                       #legend.title=element_text(size=20),
+                                       #plot.caption=element_text(size=18), 
+                                       #plot.subtitle = element_text(size = 16), 
+                                       #axis.ticks = element_blank(), 
+                                       strip.text = element_text(size = 0)
+                                      )
+```
+
+```{r}
+#sampleInfo <- readRDS("rObjects/sampleInfo.rds")
+seuratObj <- readRDS("rObjects/seuratObj_C16_C10_C15_D33.rds")
+annotations <- read.csv("annotations/infected_unininfected.csv")[,2:3]
+colnames(annotations) <- c("Cluster", "Annotation")
+annotations$Cluster <- factor(annotations$Cluster)
+
+seuratObj$annotation <- annotations$Annotation[match(seuratObj$RNA_snn_res.2.2, annotations$Cluster)]
+
+annotations
+
+
+plot_cols <- c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00')
+names(plot_cols) <- annotations$Annotation %>% unique()
+#saveRDS(plot_cols, "rObjects/plot_cols_conjunctiva.rds")
+
+``` 
+
+## NFKB boxplot
+
+```{r}
+NFKB_list <- read.csv("csvFiles/NFKB_targets.csv", header = FALSE)$V1
+
+setdiff(NFKB_list, rownames(seuratObj@assays$RNA@counts))
+
+
+NFKB_list <- intersect(NFKB_list, rownames(seuratObj@assays$RNA@counts)) %>% list()
+
+seuratObj <- AddModuleScore(seuratObj, 
+                            features = NFKB_list, 
+                            name = "NFKB_score")
+
+
+
+
+
+#seuratObj$annotation %>% unique()
+p1 <- VlnPlot(seuratObj[,seuratObj$annotation == "superficial conjunctival epithelium"], features = "NFKB_score1",  group.by = "group", pt.size = 0) 
+p2 <-VlnPlot(seuratObj[,seuratObj$annotation == "conjunctival epithelial progenitors"], features = "NFKB_score1",  group.by = "group", pt.size = 0) 
+p3 <- VlnPlot(seuratObj[,seuratObj$annotation == "basal conjunctival epithelium"], features = "NFKB_score1",  group.by = "group", pt.size = 0) 
+p4 <- VlnPlot(seuratObj[,seuratObj$annotation == "fibroblasts"], features = "NFKB_score1",  group.by = "group", pt.size = 0) 
+
+
+
+p = p1
+cellType = "superficial conjunctival epithelium"
+cols <- c("#2596be", "#862120","#34A488")
+avergageBoxPlot <- function(p, cellType){
+dat <- p$data
+ggplot(dat, aes(ident, NFKB_score1, fill = ident)) + 
+   geom_boxplot() +
+   theme_minimal() +   labs(x = "Group", 
+                            y = "NFKB Average Expression") + 
+  NoLegend() + 
+  ggtitle(cellType) + 
+  scale_fill_manual(values = cols)
+}
+
+
+
+p1b <- avergageBoxPlot(p1, "Superficial conjunctival epithelium")
+p2b <- avergageBoxPlot(p2, "Conjunctival epithelial progenitors")
+p3b <- avergageBoxPlot(p3, "Basal conjunctival epithelium")
+p4b <- avergageBoxPlot(p4, "Fibroblasts")
+
+p1b + p2b + p3b + p4b +   ggsave("highRes/NFKB_boxplot.tiff", width = 8, height = 6)
+
+# p1b + p2b + p3b + p4b +   ggsave("highRes/ISG_boxplot.png", width = 8, height = 6)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.

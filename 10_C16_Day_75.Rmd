@@ -1,0 +1,571 @@
+---
+title: "C16, Day 75"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, libraries}
+library(harmony)
+library(Seurat)
+library(cowplot)
+library(SCFunctionsV3)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(tidyverse)
+library(DoubletFinder)
+library(pheatmap)
+library(ggplot2)
+
+
+theme_set(
+    theme_classic(base_size = 25)
+)
+
+
+cornea_theme <- cowplot::theme_cowplot() +theme(plot.title = element_text(size=20), 
+                                       axis.title.x = element_text(size=20),
+                                       axis.title.y = element_text(size=20),
+                                       axis.text=element_text(size=18),
+                                       axis.text.x= element_text(size = 18, angle = 45, hjust = 1), 
+                                       axis.text.y= element_text(size = 18),
+                                       #legend.text = element_text(size = 16),
+                                       #legend.title=element_text(size=20),
+                                       #plot.caption=element_text(size=18), 
+                                       #plot.subtitle = element_text(size = 16), 
+                                       #axis.ticks = element_blank(), 
+                                       strip.text = element_text(size = 0)
+                                      )
+
+```
+
+
+```{r}
+#sampleInfo <- readRDS("rObjects/sampleInfo.rds")
+seuratObj <- readRDS("rObjects/sObj_Filtered_run2.rds")[[3]]
+```
+
+
+
+## Annotation 
+The clusters were grouped into "conj_superficial"       "epithelial_progenitors" "conj_suprabasal"        "conj_basal"  and "fibroblasts" 
+
+```{r}
+plot_cols <- readRDS("rObjects/plot_cols_conjunctiva.rds")
+
+annotations <- read.csv("annotations/D75", sep = ",", header = TRUE)
+colnames(annotations) <- c("Cluster", "Annotation")
+
+
+seuratObj$annotation <- annotations$Annotation[match(seuratObj$RNA_snn_res.1, annotations$Cluster)]
+
+annotations
+
+```
+
+
+
+```{r}
+DimPlot(seuratObj, 
+        group.by = "annotation", 
+        cols = plot_cols) + ggsave("highRes/UMAP_annotations_C16_D75.tiff", width = 8, height = 4)
+
+```
+## High Res Gene plots
+
+```{r}
+genes <- c("krt4",  "muc4", "muc1",
+"krt14","tp63", "krt23", "col4a5",
+"krt13", "krt19",
+"acta2", "COL1A1",
+"ace2", "tmprss2", "NC-045512-2") %>% toupper
+
+
+genes <- intersect(genes, rownames(seuratObj))
+
+gene <- genes[14]
+for (i in 1:length(genes)){
+  gene <- genes[i]
+  
+  p1 <- FeaturePlot(seuratObj, features = gene, , 
+                    min.cutoff = "q1", 
+                    cols = c("#E5E5E5", "#FF0000"), 
+                    label = TRUE, order = TRUE, label.size = 2
+                    ) + 
+    theme(panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        text = element_text(size=10))  
+    
+    p1 + ggsave(paste0("highRes/D75_expression_plot_",                                                                          gene, 
+                                                       ".tiff"), 
+                                                                         width = 6, height = 4)
+
+  
+  
+  
+}
+
+
+
+
+
+```
+
+# Percentage of cells in each main group
+
+```{r}
+seuratObj$sars_cov2_pos <- seuratObj@assays$RNA@counts["NC-045512-2",] > 0
+
+numberCells <- seuratObj[[]][, c("annotation", "sars_cov2_pos")] %>% 
+  group_by(annotation) %>% 
+  summarise(number_cells = n(),
+            sars_cov2_pos_cells = sum(sars_cov2_pos),
+            percentage_cells = n()/dim(seuratObj)[2] * 100
+            )
+
+numberCells$percentage_cells_sars_cov2 <- numberCells$sars_cov2_pos_cells / numberCells$number_cells * 100
+
+
+numberCells %>% write.csv("csvFiles/percentage_cells_c16_C10_C15.csv")
+
+```
+
+
+# Relative proportion of infected cell types based on expression of viral spike (S) gene
+
+
+
+```{r}
+exposedCells <- seuratObj[,seuratObj$condition == "positive"][[]][, c("annotation", "sars_cov2_pos")] %>% 
+  group_by(annotation) %>% 
+  summarise(number_cells = n(),
+            sars_cov2_pos_cells = sum(sars_cov2_pos),
+            infected = sum(sars_cov2_pos)/n() * 100
+            )
+
+
+
+exposedCells$uninfected <- 100 - exposedCells$infected
+
+write.csv(exposedCells, "csvFiles/exposedCells.csv")
+
+exposedCells <- gather(exposedCells, 
+                       Condition, 
+                       percentage_cells, 
+                       infected:uninfected)
+
+ggplot(exposedCells, aes(annotation, percentage_cells, fill = Condition)) + geom_bar(stat = "identity") +  theme_minimal() +  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +   labs(x = "Cell Type", y = "% cells") +  ggsave("highRes/infected_cell_types.tiff", width = 4, height = 4)
+```
+# ISG List
+
+
+```{r}
+isg_list <- read.csv("ISG_List", header = FALSE)$V1
+isg_list <- list(intersect(isg_list, rownames(seuratObj)))
+
+seuratObj <- AddModuleScore(seuratObj, 
+                            features = isg_list, name = "ISG")
+
+
+seuratObj <- AddModuleScore(seuratObj, 
+                            features = isg_list, 
+                            name = "ISG_1000_", 
+                            ctrl = 200
+                            )
+
+
+isg_list <- read.csv("ISG_List", header = FALSE)$V1
+seuratObj$ISG_mean <- colSums(seuratObj@assays$RNA@data[intersect(isg_list, rownames(seuratObj)),])/length(intersect(isg_list, rownames(seuratObj)))
+
+
+
+seuratObj$group <- "unexposed"
+
+seuratObj$group[seuratObj$condition == "positive"] <- ifelse(seuratObj$sars_cov2_pos[seuratObj$condition == "positive"], 
+                                                             yes = "exposed infected", 
+                                                             no = "exposed uninfected")
+
+seuratObj$annotation %>% unique()
+p1 <- VlnPlot(seuratObj[,seuratObj$annotation == "conj_superficial"], features = "ISG1",  group.by = "group", pt.size = 0) 
+p2 <-VlnPlot(seuratObj[,seuratObj$annotation == "epithelial_progenitors"], features = "ISG1",  group.by = "group", pt.size = 0) 
+p3 <- VlnPlot(seuratObj[,seuratObj$annotation == "conj_basal"], features = "ISG1",  group.by = "group", pt.size = 0) 
+p4 <- VlnPlot(seuratObj[,seuratObj$annotation == "fibroblasts"], features = "ISG1",  group.by = "group", pt.size = 0) 
+
+
+
+p = p1
+cellType = "Conj_Superficial"
+cols <- c("#2596be", "#862120","#34A488")
+avergageBoxPlot <- function(p, cellType){
+dat <- p$data
+ggplot(dat, aes(ident, ISG1, fill = ident)) + 
+   geom_boxplot() +
+   theme_minimal() +   labs(x = "Group", 
+                            y = "IGS Average Expression") + 
+  NoLegend() + 
+  ggtitle(cellType) + 
+  scale_fill_manual(values = cols)
+}
+
+
+
+p1b <- avergageBoxPlot(p1, "conj_superficial")
+p2b <- avergageBoxPlot(p2, "epithelial_progenitors")
+p3b <- avergageBoxPlot(p3, "conj_basal")
+p4b <- avergageBoxPlot(p4, "fibroblasts")
+
+p1b + p2b + p3b + p4b +   ggsave("highRes/ISG_boxplot.tiff", width = 8, height = 6)
+
+
+# Data <- p1$data
+
+
+
+# wilcoxonTest <- function(Data, cellType){
+#   Data$ISG1 <- log2(Data$ISG1) 
+#   #Seperate  Data
+#   DataControl<- Data%>%
+#                   filter(ident =="unexposed")
+#   DataTest <- Data %>%
+#     filter(ident == "exposed infected")
+#   DataTest2 <- Data %>%
+#     filter(ident == "exposed uninfected") 
+#   
+#   Res1 <- wilcox.test(DataControl$ISG1, DataTest$ISG1, paired = FALSE)$p.value
+#   Res2 <- wilcox.test(DataControl$ISG1, DataTest2$ISG1, paired = FALSE)$p.value
+#   Res3 <- wilcox.test(DataTest$ISG1, DataTest2$ISG1, paired = FALSE)$p.value
+#     #group_by(ident) %>%
+#     #summarise(p_value = wilcox.test(DataControl$ISG1, ISG1, exact = FALSE)$p.value )
+#   
+#   Res <- data.frame(p.value = c(Res1, Res2, Res3),
+#              test = c("exposed infected vs unexposed", 
+#                       "exposed uninfected vs unexposed", 
+#                       "exposed infected vs exposed uninfected"),
+#              cellType = cellType)
+#   
+#   return(Res)
+#   
+#   }
+# 
+# 
+# 
+# ## is the distribution normal?
+# qqplot <- function(Data){
+#   p <- ggplot(Data, aes(sample = ISG1))
+#   p1 <- p + stat_qq() + stat_qq_line() + facet_wrap(~ident)
+#   return(p1)
+# }
+# 
+# 
+# qqplot(p1$data)
+# qqplot(p2$data)
+# qqplot(p3$data)
+# qqplot(p4$data)
+# 
+# 
+# res <- wilcoxonTest(p1$data, "conj_superficial")
+# 
+# res <-rbind(res, wilcoxonTest(p2$data, "epithelial_progenitors"))
+# res <-rbind(res, wilcoxonTest(p3$data, "conj_basal"))
+# res <-rbind(res, wilcoxonTest(p4$data, "fibroblasts"))
+# 
+# 
+# res$p.value.adjust <- p.adjust(res$p.value)
+# 
+# res$significant <- res$p.value.adjust < 0.05 
+# 
+# 
+# write.csv(res, )
+```
+
+## Heatmap of ISG expression
+
+```{r}
+isg_list_short <- read.csv("ISG_List", header = FALSE)$V1
+
+isg_list_short <- intersect(isg_list_short, rownames(seuratObj@assays$RNA@scale.data))
+
+tmp <- seuratObj@assays$RNA@scale.data[isg_list_short,]
+
+tmp <- tmp %>% data.frame() %>%  t() %>% data.frame()
+
+
+
+positive_negative <- ifelse(seuratObj@assays$RNA@counts["NC-045512-2",] > 0, 
+                            yes = "infected", 
+                            no = "uninfected")
+
+
+infected_uninfected <- ifelse(seuratObj$condition == "positive" , yes = "exposed", no = "unexposed")
+
+seuratObj$groups <- paste(infected_uninfected, positive_negative, sep = "_")
+tmp$group <- seuratObj$groups
+tmp$annotation <- seuratObj$annotation
+tmp$annotation_group <- paste(tmp$group, 
+                              tmp$annotation, 
+                              sep = "_")
+
+data_long <- gather(tmp, gene, expression, isg_list_short)
+data_long$group <- gsub("unexposed_uninfected", "unexposed", data_long$group)
+data_long$group <- gsub("_", ",", data_long$group)
+
+p1 <- ggplot(data_long, aes(gene, group, fill = expression)) + 
+  geom_tile() +
+  scale_fill_steps2(
+  low = "#00eaff",
+  high = "#ff0000",
+  mid = "white", 
+  midpoint = 0) + 
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
+  facet_wrap(~annotation, ncol = 1) + labs(x = "", y = "")
+
+p1 + ggsave("highRes/ISG_heatmap.tiff", width = 12, height = 6)
+
+```
+
+## Dot plot of differentially-expressed IFNs
+
+```{r}
+seuratObj$clusters <- seuratObj@active.ident
+seuratObj <- SetIdent(seuratObj, value = "annotation")
+
+markers <- FindAllMarkers(seuratObj, only.pos = TRUE)
+DE_list <- list.files("csvFiles/DE_Lists_conjunctiva_files_moved/", pattern = "vs")
+
+markers_IFN <- markers[grepl("IFN", markers$gene), ]
+
+markers_IFN %>%  write.csv("csvFiles/markers_IFNs.csv")
+
+gene_list <- markers$gene[grepl("IFN", markers$gene)] %>% unique()
+p2 <- DotPlot(seuratObj, 
+              features = rev(gene_list), 
+              cols = c("blue", "red"), 
+              col.min = 0, 
+              col.max = 2.5,
+              group.by = "annotation_group") 
+
+
+
+p2$data %>%  
+  dplyr::filter(pct.exp > 0 ) %>%   
+  ggplot(aes(x= features.plot, y = id, color = avg.exp.scaled, size = pct.exp)) + 
+  geom_point() +
+  ylab('') +
+  xlab('') + 
+  scale_colour_gradient(low = "blue", high = "red") + 
+  cornea_theme +
+  scale_radius(range = c(0, 5)) +  
+  # ggsave("SarsCov2_Figures/entrty_factors.tiff", width = 35, height = 20, units = "cm", dpi = 300) +
+  ggsave("highRes/DE_IFNs.tiff", width = 43, height = 20, units = "cm", dpi = 300)
+
+p2$data %>% write.csv("csvFiles/DE_IFNs.csv")
+
+```
+
+## dot plot NF-KB
+
+```{r}
+gene_list <- read.csv("csvFiles/NF-KB", header = FALSE)$V1
+
+
+p2 <- DotPlot(seuratObj, 
+              features = rev(gene_list), 
+              cols = c("blue", "red"), 
+              col.min = 0, 
+              col.max = 2.5,
+              group.by = "annotation_group") 
+
+
+
+p2$data %>%  
+  dplyr::filter(pct.exp > 0 ) %>%   
+  ggplot(aes(x= features.plot, y = id, color = avg.exp.scaled, size = pct.exp)) + 
+  geom_point() +
+  ylab('') +
+  xlab('') + 
+  scale_colour_gradient(low = "blue", high = "red") + 
+  cornea_theme +
+  scale_radius(range = c(0, 5)) +  
+  # ggsave("SarsCov2_Figures/entrty_factors.tiff", width = 35, height = 20, units = "cm", dpi = 300) +
+  ggsave("highRes/NF-KB.tiff", width = 43, height = 20, units = "cm", dpi = 300)
+
+p2$data %>% write.csv("csvFiles/NF-KB.csv")
+
+
+
+```
+
+## dot plot 
+
+
+```{r}
+gene_list <- read.csv("csvFiles/virus_stimulated_genes", header = FALSE)$V1
+
+
+p2 <- DotPlot(seuratObj, 
+              features = gene_list, 
+              cols = c("blue", "red"), 
+              col.min = 0, 
+              col.max = 2.5,
+              group.by = "annotation_group") 
+
+
+seuratObj$condition_cellType <- paste(seuratObj$condition, seuratObj$annotation)
+DotPlot(seuratObj, 
+              features = gene_list, 
+              cols = c("blue", "red"), 
+              col.min = 0, 
+              col.max = 2.5,
+              group.by = "condition_cellType") 
+
+p2$data %>%  
+  dplyr::filter(pct.exp > 0 ) %>%   
+  ggplot(aes(x= features.plot, y = id, color = avg.exp.scaled, size = pct.exp)) + 
+  geom_point() +
+  ylab('') +
+  xlab('') + 
+  scale_colour_gradient(low = "blue", high = "red") + 
+  cornea_theme +
+  scale_radius(range = c(0, 5)) +  
+  # ggsave("SarsCov2_Figures/entrty_factors.tiff", width = 35, height = 20, units = "cm", dpi = 300) +
+  ggsave("highRes/virus_stimulated.tiff", width = 43, height = 20, units = "cm", dpi = 300)
+
+p2$data %>% write.csv("csvFiles/virus_stimulated.csv")
+
+
+
+```
+
+```{r, eval = FALSE}
+saveRDS(seuratObj, "rObjects/seuratObj_C16_C10_C15_D33.rds")
+```
+
+
+
+
+```{r}
+data("pbmc_small")
+cd_features <- list(c(
+  'CD79B',
+  'CD79A',
+  'CD19',
+  'CD180',
+  'CD200',
+  'CD3D',
+  'CD2',
+  'CD3E',
+  'CD7',
+  'CD8A',
+  'CD14',
+  'CD1C',
+  'CD68',
+  'CD9',
+  'CD247'
+))
+pbmc_small <- AddModuleScore(
+  object = pbmc_small,
+  features = cd_features,
+  ctrl = 5,
+  name = 'CD_Features'
+)
+```
+
+
+
+# Gene Plots
+
+
+```{r}
+genes <- c("krt7", "krt13", "s100a8",  "s100a9", "krt6a", "krt14", "krt15", "muc1", "muc4", "krt4", "krt12", "krt3", "lypd2", "hes1", "hes5", "krt24", "areg", "COL1A1", "fbln1", "col1a3", "kera", "lum", "mmp3", "tagln", "acta2", "tp63", "ace2", "tmprss2", "Mki67", "CDH19", "CCL21", "LYVE1", "POSTN", "isg15", "rsad2", "NC-045512-2") %>% toupper()
+```
+
+
+```{r}
+plotGenes <- function(sObj, geneList){
+  sampleName <- as.character(unique(sObj$orig.ident))
+  geneList <- intersect(geneList, rownames(sObj))
+  p_list <- list()
+    for (gene in geneList){
+      p1 <- FeaturePlot(sObj, features = gene, 
+                        min.cutoff = "q1", 
+                        cols = c("#E5E5E5", "#FF0000"), 
+                        label = TRUE, order = TRUE, label.size = 2
+                        ) +
+        theme(panel.grid = element_blank(),
+            axis.title = element_blank(),
+            axis.text = element_blank(),
+            axis.ticks = element_blank(),
+            text = element_text(size=10)) 
+        
+      p1
+      p_list[[gene]] <- p1
+    
+    }
+  
+  return(p_list)
+}
+
+p_list <- plotGenes(seuratObj, geneList = genes)
+
+
+p_list
+
+
+```
+
+## Numbers of Cells
+
+```{r, fig.height = 30, fig.width= 15}
+number_cells_by_stage <- seuratObj[[]] %>% select(c("tissue", "RNA_snn_res.2.2")) %>% group_by(tissue) %>% summarise(number_cells_by_sample = n())
+
+number_cells <- seuratObj[[]] %>% select(c("tissue", "RNA_snn_res.2.2")) %>% group_by(tissue,RNA_snn_res.2.2) %>% summarise(number_cells = n()) %>% left_join(number_cells_by_stage)
+
+
+number_cells$normalised_cell_number <- number_cells$number_cells /number_cells$number_cells_by_sample * 100
+
+
+number_cells <- number_cells %>% select(c("tissue", "RNA_snn_res.2.2", "normalised_cell_number")) %>% group_by(RNA_snn_res.2.2) %>% summarise(cluster_total = sum(normalised_cell_number)) %>% right_join(number_cells)
+
+
+
+
+number_cells$percentage <- number_cells$normalised_cell_number / number_cells$cluster_total * 100
+
+
+number_cells %>% 
+  ggplot(aes(tissue, percentage, fill = tissue)) + 
+  geom_bar(stat =  "identity") + 
+  facet_wrap(~RNA_snn_res.2.2, nrow = 14, scales = "free", drop = FALSE) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+
+
+
+```
+
+# percentage of ace2pos tmprss2 pos co-expressing cells
+
+36% of cells co-express ace2 and tmprss
+
+```{r}
+total_cells <- dim(seuratObj)[2]
+
+ACE2_TMPRSS2Pos <- seuratObj@assays$RNA@counts["ACE2",] > 0 & 
+seuratObj@assays$RNA@counts["TMPRSS2",] > 0
+
+
+sum(ACE2_TMPRSS2Pos) / total_cells * 100
+```
+
+
+

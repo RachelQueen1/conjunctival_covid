@@ -1,0 +1,251 @@
+---
+title: "C16, C1O, C15 Day 33 Integration, all samples"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, libraries}
+library(harmony)
+library(Seurat)
+library(cowplot)
+library(SCFunctionsV3)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(tidyverse)
+library(DoubletFinder)
+library(pheatmap)
+library(ggplot2)
+```
+
+
+```{r}
+#sampleInfo <- readRDS("rObjects/sampleInfo.rds")
+seuratObj <- readRDS("rObjects/seuratObj_C16_C10_C15_D33.rds")
+seuratObj$sample <- paste(seuratObj$cell_line, seuratObj$condition, sep = "_")
+```
+
+# Samples Integrated
+
+C16	Conjunctiva	33 negative
+C16	Conjunctiva	33 positive
+C15	Conjunctiva	33 negative
+C15	Conjunctiva	33 positive
+C10	Conjunctiva	33 negative
+C10	Conjunctiva	33 positive
+
+```{r, eval = FALSE}
+# 5_integrate_conjunctiva.R
+```
+
+There were small technical differences between the number of counts and number of genes and percentage mitochondria between the three samples. These factors were regressed out.
+
+```{r}
+VlnPlot(seuratObj, 
+        group.by = "sample", 
+        features = c("nCount_RNA", 
+                     "nFeature_RNA", 
+                     "percent.mt"), 
+        pt.size = 0)
+```
+
+
+```{r, harmony, eval = FALSE}
+# 5_integrate_conjunctiva.R
+```
+
+
+## Integrated data
+
+Differences between the samples are seen after integration.
+
+```{r, fig.width=25, fig.height = 15}
+
+
+
+#p0 <- DimPlot(seuratObj)
+p1 <- DimPlot(seuratObj, group.by = "sample")
+p2 <- DimPlot(seuratObj, group.by = "Phase")
+
+
+p1 + p2 
+
+```
+
+## Clusters
+
+```{r, fig.width=25, fig.height = 15}
+p0 <- DimPlot(seuratObj, label = TRUE)
+
+p0 
+```
+
+
+# Gene Plots
+
+```{r}
+genes <- c("krt7", "krt13", "s100a8",  "s100a9", "krt6a", "krt14", "krt15", "muc1", "muc4", "krt4", "krt12", "krt3", "lypd2", "hes1", "hes5", "krt24", "areg", "COL1A1", "fbln1", "col1a3", "kera", "lum", "mmp3", "tagln", "acta2", "tp63", "ace2", "tmprss2", "Mki67", "CDH19", "CCL21", "LYVE1", "POSTN", "isg15", "rsad2") %>% toupper()
+
+
+covid_genes <- readRDS("rObjects/covid_genes.rds")
+
+genes <- c(genes, covid_genes)
+
+```
+
+
+```{r}
+plotGenes <- function(sObj, geneList){
+  sampleName <- as.character(unique(sObj$orig.ident))
+  geneList <- intersect(geneList, rownames(sObj))
+  p_list <- list()
+    for (gene in geneList){
+      p1 <- FeaturePlot(sObj, features = gene, 
+                        min.cutoff = "q1", 
+                        cols = c("#E5E5E5", "#FF0000"), 
+                        label = TRUE, order = TRUE, label.size = 2
+                        ) +
+        theme(panel.grid = element_blank(),
+            axis.title = element_blank(),
+            axis.text = element_blank(),
+            axis.ticks = element_blank(),
+            text = element_text(size=10)) 
+        
+      p1
+      p_list[[gene]] <- p1
+    
+    }
+  
+  return(p_list)
+}
+
+p_list <- plotGenes(seuratObj, geneList = genes)
+
+
+p_list
+
+
+```
+
+
+## Numbers of Cells
+
+```{r, fig.height = 30, fig.width= 15}
+number_cells_by_stage <- seuratObj[[]] %>% select(c("sample", "RNA_snn_res.2.2")) %>% group_by(sample) %>% summarise(number_cells_by_sample = n())
+
+number_cells <- seuratObj[[]] %>% select(c("sample", "RNA_snn_res.2.2")) %>% group_by(sample,RNA_snn_res.2.2) %>% summarise(number_cells = n()) %>% left_join(number_cells_by_stage)
+
+
+number_cells$normalised_cell_number <- number_cells$number_cells /number_cells$number_cells_by_sample * 100
+
+
+number_cells <- number_cells %>% select(c("sample", "RNA_snn_res.2.2", "normalised_cell_number")) %>% group_by(RNA_snn_res.2.2) %>% summarise(cluster_total = sum(normalised_cell_number)) %>% right_join(number_cells)
+
+
+
+
+number_cells$percentage <- number_cells$normalised_cell_number / number_cells$cluster_total * 100
+
+
+number_cells %>% 
+  ggplot(aes(sample, percentage, fill = sample)) + 
+  geom_bar(stat =  "identity") + 
+  facet_wrap(~RNA_snn_res.2.2, nrow = 14, scales = "free", drop = FALSE) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+
+
+
+```
+
+# TO DO!!
+## Annotation 
+The clusters were grouped into "conj_superficial"       "epithelial_progenitors" "conj_suprabasal"        "conj_basal"  and "fibroblasts" 
+
+```{r, eval = FALSE}
+
+
+annotations <- read.csv("conjunctiva_labels_negative.txt", sep = ":", header = FALSE)
+colnames(annotations) <- c("Cluster", "Annotation", "Genes")
+annotations$Genes <- annotations$Genes %>% toupper
+
+
+seuratObj$annotation <- annotations$Annotation[match(seuratObj$RNA_snn_res.2.2, annotations$Cluster)]
+
+annotations
+
+
+plot_cols <- c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00')
+names(plot_cols) <- annotations$Annotation %>% unique()
+saveRDS(plot_cols, "rObjects/plot_cols_conjunctiva.rds")
+
+
+DimPlot(seuratObj, group.by = "annotation", cols = plot_cols) + ggsave("highRes/UMAP_annotations_C16_C10_C15_negative.tiff", width = 8, height = 4)
+
+```
+
+# TO DO!!
+## High Res Gene plots
+
+```{r, eval = FALSE}
+genes <- c("krt4",  "muc4", "muc1",
+"krt14","tp63", "krt23", "col4a5",
+"krt13", "krt19",
+"acta2", "COL1A1",
+"ace2", "tmprss2") %>% toupper
+
+
+gene <- genes[1]
+for (i in 1:length(genes)){
+  gene <- genes[i]
+  
+  p1 <- FeaturePlot(seuratObj, features = gene, , 
+                    min.cutoff = "q1", 
+                    cols = c("#E5E5E5", "#FF0000"), 
+                    label = TRUE, order = TRUE, label.size = 2
+                    ) + 
+    theme(panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        text = element_text(size=10))  
+    
+    p1 + ggsave(paste0("highRes/expression_plot_",                                                                          gene, 
+                                                       "_C16_C10_C15_negative.tiff"), 
+                                                                         width = 6, height = 4)
+
+  
+  
+  
+}
+
+
+
+
+
+```
+
+# TO DO!!
+# Percentage of cells in each main group - 
+
+```{r, eval = FALSE}
+numberCells <- seuratObj[[]][, "annotation", drop = FALSE] %>% 
+  group_by(annotation) %>% 
+  summarise(number_cells = n(),
+            percentage_cells = n()/dim(seuratObj)[2] * 100) %>% write.csv("csvFiles/percentage_cells_c16_C10_C15_negative.csv")
+
+```
+
+
+
+
+
+
+

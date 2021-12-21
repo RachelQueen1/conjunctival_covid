@@ -1,0 +1,208 @@
+---
+title: "SCARFs, ISGs C16, C1O, C15 Day 33 Integration"
+output: html_notebook
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+
+```
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(SCFunctionsV3)
+library(ggplot2)
+library(dplyr)
+library(cowplot)
+```
+
+```{r}
+theme_set(
+    theme_classic(base_size = 25)
+)
+
+
+cornea_theme <- cowplot::theme_cowplot() +theme(plot.title = element_text(size=20), 
+                                       axis.title.x = element_text(size=20),
+                                       axis.title.y = element_text(size=20),
+                                       axis.text=element_text(size=18),
+                                       axis.text.x= element_text(size = 18, angle = 45, hjust = 1), 
+                                       axis.text.y= element_text(size = 18),
+                                       #legend.text = element_text(size = 16),
+                                       #legend.title=element_text(size=20),
+                                       #plot.caption=element_text(size=18), 
+                                       #plot.subtitle = element_text(size = 16), 
+                                       #axis.ticks = element_blank(), 
+                                       strip.text = element_text(size = 0)
+                                      )
+```
+
+```{r}
+#sampleInfo <- readRDS("rObjects/sampleInfo.rds")
+seuratObj <- readRDS("rObjects/seuratObj_C16_C10_C15_D33.rds")
+annotations <- read.csv("conjunctiva_labels.txt", sep = ":", header = FALSE)
+colnames(annotations) <- c("Cluster", "Annotation", "Genes")
+annotations$Genes <- annotations$Genes %>% toupper
+
+
+seuratObj$annotation <- annotations$Annotation[match(seuratObj$RNA_snn_res.2.2, annotations$Cluster)]
+
+annotations
+
+
+plot_cols <- c('#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00')
+names(plot_cols) <- annotations$Annotation %>% unique()
+#saveRDS(plot_cols, "rObjects/plot_cols_conjunctiva.rds")
+
+```
+
+
+```{r}
+seuratObj$group <- "unexposed"
+seuratObj$sars_cov2_pos <- seuratObj@assays$RNA@counts["NC-045512-2",] > 0
+seuratObj$group[seuratObj$condition == "positive"] <- ifelse(seuratObj$sars_cov2_pos[seuratObj$condition == "positive"], 
+                                                             yes = "exposed, infected", 
+                                                             no = "exposed, uninfected")
+
+seuratObj$annotation_group <- paste(seuratObj$annotation, seuratObj$group, sep = ": ")
+
+
+```
+
+
+
+
+
+
+```{r}
+
+entry_genes <- read.csv("csvFiles/entry_genes.csv")
+
+
+#familyGenes <- c("HPN", "TMPRSS2", "TMPRSS3", "TMPRSS4", "TMPRSS5","MSPL","TMPRSS15", "ACE1", "ACE2")
+
+gene_list <- c(entry_genes$Gene, "BSG") 
+p2 <- DotPlot(seuratObj, 
+              features = rev(gene_list), 
+              cols = c("blue", "red"), 
+              col.min = 0, 
+              col.max = 2.5,
+              group.by = "annotation_group") 
+
+
+
+p2$data %>%  
+  dplyr::filter(pct.exp > 0 ) %>%   
+  ggplot(aes(x= features.plot, y = id, color = avg.exp.scaled, size = pct.exp)) + 
+  geom_point() +
+  ylab('') +
+  xlab('') + 
+  scale_colour_gradient(low = "blue", high = "red") + 
+  cornea_theme +
+  scale_radius(range = c(0, 5)) +  
+  # ggsave("SarsCov2_Figures/entrty_factors.tiff", width = 35, height = 20, units = "cm", dpi = 300) +
+  ggsave("highRes/SCARFS.tiff", width = 43, height = 20, units = "cm", dpi = 300)
+
+p2$data %>% write.csv("csvFiles/scarfs.csv")
+#p2$data %>% write.csv("SarsCov2_Figures/entrty_factors.csv")
+
+
+
+
+
+
+```
+
+
+How many of ACE2+ TMPRSS2+ expressed the restriction factors?
+
+ 
+IFITM1
+
+IFITM2
+
+IFITM3
+
+LY6E
+
+```{r}
+
+both_filter <- sObj_RNA@assays$RNA@counts["ACE2", ] > 0 & 
+                  sObj_RNA@assays$RNA@counts["TMPRSS2", ] > 0
+ACE2pos_TMPRSS2pos <- sObj_RNA[, both_filter]
+
+gene <- "IFITM1"
+genes <- c("IFITM1", "IFITM2", "IFITM3", "LY6E")
+df <- data.frame(cluster = ACE2pos_TMPRSS2pos$cellType)
+
+for (gene in genes){
+df[, gene] <- c(ACE2pos_TMPRSS2pos@assays$RNA@counts[gene, ] > 0) * 1
+}
+
+
+df %>% group_by(cluster) %>% summarise_all(sum) %>% write.csv("SarsCov2_Figures/restriction_factors.csv")
+
+```
+
+
+
+```{r}
+
+
+sObj <- merge(sObj_RNA, developmental_all)
+
+sObj$stage[is.na(sObj$stage)] <- "adult"
+sObj <- SetIdent(sObj, value = sObj$stage)
+
+
+both_filter <- sObj@assays$RNA@counts["ACE2", ] > 0 & 
+                  sObj@assays$RNA@counts["TMPRSS2", ] > 0
+
+df_both <- data.frame(table(sObj@active.ident, both_filter)) %>% 
+  tidyr::spread(both_filter, Freq) %>%
+  dplyr::rename(id = "Var1", )
+df_both$totalCells = df_both$'FALSE' + df_both$'TRUE'
+df_both$pct.exp = df_both$'TRUE' / df_both$totalCells * 100
+df_both$features.plot <- "Co-Expression"
+
+
+both_filter <- sObj@assays$RNA@counts["ACE2", ] > 0 
+
+df_ACE2 <- data.frame(table(sObj@active.ident, both_filter)) %>% 
+  tidyr::spread(both_filter, Freq) %>%
+  dplyr::rename(id = "Var1", )
+df_ACE2$totalCells = df_ACE2$'FALSE' + df_ACE2$'TRUE'
+df_ACE2$pct.exp = df_ACE2$'TRUE' / df_ACE2$totalCells * 100
+df_ACE2$features.plot <- "Co-Expression"
+
+
+both_filter <- sObj@assays$RNA@counts["TMPRSS2", ] > 0 
+
+df_TMPRSS2 <- data.frame(table(sObj@active.ident, both_filter)) %>% 
+  tidyr::spread(both_filter, Freq) %>%
+  dplyr::rename(id = "Var1", )
+df_TMPRSS2$totalCells = df_TMPRSS2$'FALSE' + df_TMPRSS2$'TRUE'
+df_TMPRSS2$pct.exp = df_TMPRSS2$'TRUE' / df_TMPRSS2$totalCells * 100
+df_TMPRSS2$features.plot <- "Co-Expression"
+
+
+
+
+
+data_frame(stage = df$id,
+           number_ACE2 = df_ACE2$'TRUE',
+           number_TMPRSS22 = df_TMPRSS2$'TRUE', 
+           number_both = df_both$'TRUE',
+           percentage_ACE2 = df_ACE2$pct.exp,
+           percentage_TMPRSS22 = df_TMPRSS2$pct.exp, 
+           percentage_both = df_both$pct.exp
+           ) %>% write.csv("SarsCov2_Figures/number_cells.csv")
+
+
+
+
+
+```
+

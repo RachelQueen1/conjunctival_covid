@@ -1,0 +1,176 @@
+---
+title: "Compare with Adult cornea"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+I combined the conjuntival organoids with adult cornea using a standard harmony batch correction. I combined the organoids with:
+
+1. All the whole cornea dataset  
+2. Clusters 0 and 6
+3. Clusters 0,6 and 9
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(SCFunctionsV3)
+library(ggplot2)
+library(dplyr)
+library(cowplot)
+
+seuratObj_C16_C10_C15_D33 <- readRDS("/data/rachel/Linda_Lako/Covid_SC/Repeat/rObjects/seuratObj_C16_C10_C15_D33.rds")
+
+seuratAdult <- readRDS("/data/rachel/Linda_Lako/Cornea/Adult_Cornea/rObjects/Combined.rds")
+## processed compare_with_cornea.R
+seurat_all <- readRDS("rObjects/cornea_comparison_all.rds")
+seurat_0_6 <- readRDS("rObjects/cornea_comparison_0_6.rds")
+seurat_0_6_9 <- readRDS("rObjects/cornea_comparison_0_6_9.rds")
+seurat_superficial_0_6 <- readRDS("rObjects/cornea_comparison_superficial_0_6.rds")
+seurat_superficial <- readRDS("rObjects/cornea_comparison_superficial_6.rds")
+seurat_basal_0_6 <- readRDS("rObjects/cornea_comparison_basal_0_6.rds")
+seurat_basal <- readRDS("rObjects/cornea_comparison_basal_0.rds")
+
+
+plotCols1 <- c(readRDS("/data/rachel/Linda_Lako/Cornea/Adult_Cornea/rObjects/plotCols21.rds"))
+
+
+plotCols2 <- readRDS("rObjects/plot_cols_conjunctiva.rds")
+names(plotCols2) <- c("basal conjunctival epithelium", "conjunctival epithelial progenitors", "fibroblasts", "superficial conjunctival epithelium")
+
+
+plotCols <- c(plotCols1, plotCols2)
+plotCols <- plotCols[levels(factor(seurat_all$cellType))]
+```
+
+
+
+## Cornea
+```{r}
+p0 <- DimPlot(seuratAdult, cols = plotCols1, pt.size = 1.5, label = TRUE)
+```
+
+
+## All cells
+
+
+```{r}
+DimPlot(seurat_all,  group.by = "tissue", label = TRUE, pt.size = 1.5)
+```
+
+
+```{r, fig.width = 20}
+p0 + DimPlot(seurat_all,  group.by = "cellType", split.by = "tissue", label = TRUE, cols = plotCols, pt.size = 1.5) 
+```
+
+
+
+
+```{r, fig.width = 20, eval = FALSE}
+
+## Subset 
+
+#The combined data was subset to just show conjunctival cells
+p <- DimPlot(seurat_all[,seurat_all$tissue == "Adult Cornea"], cols = plotCols1, pt.size = 1.5, label = TRUE)
+
+
+seurat_subset <- seurat_all[,seurat_all$cellType %in% c("0", "basal conjunctival epithelium")]
+p + DimPlot(seurat_subset,  group.by = "cellType",  label = TRUE, cols = plotCols, pt.size = 1.5) 
+seurat_subset <- seurat_all[,seurat_all$cellType %in% c("6", "basal conjunctival epithelium")]
+p + DimPlot(seurat_subset,  group.by = "cellType",  label = TRUE, cols = plotCols, pt.size = 1.5) 
+
+
+seurat_subset <- seurat_all[,seurat_all$cellType %in% c("6", "superficial conjunctival epithelium")]
+p0 + DimPlot(seurat_subset,  group.by = "cellType",  label = TRUE, cols = plotCols, pt.size = 1.5) 
+seurat_subset <- seurat_all[,seurat_all$cellType %in% c("0", "superficial conjunctival epithelium")]
+p0 + DimPlot(seurat_subset,  group.by = "cellType",  label = TRUE, cols = plotCols, pt.size = 1.5)
+
+
+```
+
+## Cluster 0, 6
+```{r}
+DimPlot(seurat_0_6,  group.by = "tissue", label = TRUE, pt.size = 1.5)
+```
+
+```{r,  fig.width = 20}
+p0 + DimPlot(seurat_0_6,  group.by = "cellType", split.by = "tissue", label = TRUE, cols = plotCols, pt.size = 1.5) 
+```
+
+
+## Cluster 0, 6, 9
+
+```{r}
+DimPlot(seurat_0_6_9,  group.by = "tissue", label = TRUE, pt.size = 1.5)
+```
+
+
+```{r, fig.width = 20}
+p0 + DimPlot(seurat_0_6_9,  group.by = "cellType", split.by = "tissue", label = TRUE, cols = plotCols, pt.size = 1.5) 
+```
+
+
+
+## Comparison of basal conjunctiva
+
+```{r, fig.width = 20}
+DimPlot(seurat_basal,  group.by = "cellType", label = TRUE, cols = plotCols, pt.size = 1.5)
+DimPlot(seurat_basal_0_6,  group.by = "cellType", label = TRUE, cols = plotCols, pt.size = 1.5) 
+```
+## Comparison of superficial conjunctiva
+
+```{r, fig.width = 20}
+DimPlot(seurat_superficial,  group.by = "cellType", label = TRUE, cols = plotCols, pt.size = 1.5)
+DimPlot(seurat_superficial_0_6,  group.by = "cellType", label = TRUE, cols = plotCols, pt.size = 1.5) 
+```
+
+
+
+The correlation of expression of the top 2000 highly variable genes between each of the ALI organoid cell type and the 21 adult cornea clusters was calculated (cluster_correlations.csv)
+
+
+```{r, eval = FALSE}
+
+df <- seurat_all@assays$RNA@data[VariableFeatures(seuratAdult),] %>% data.frame() %>% t() %>% data.frame()
+df$cluster <- seurat_all$cellType
+avgExpression <- df %>% 
+  group_by(cluster) %>% 
+  summarise_all(mean) %>%
+  as.data.frame() %>% 
+  tibble::remove_rownames() %>%
+  tibble::column_to_rownames("cluster")
+
+
+cluster1 <- seuratObj_C16_C10_C15_D33$annotation %>% unique() %>% rep(each = 21)
+
+
+comparisons <- data.frame(cluster1 = cluster1,
+                 cluster2 = as.character(rep(c(0:20), 4)), stringsAsFactors = FALSE)
+comparisons$correlation_coefficient <- 0
+
+
+for (i in 1:nrow(comparisons)){
+  comparisons$correlation_coefficient[i] <- cor(unname(unlist(avgExpression[comparisons$cluster1[i], ])), 
+    unname(unlist(avgExpression[comparisons$cluster2[i],])))
+  
+  
+}
+
+comparisons %>% arrange(cluster1, desc(correlation_coefficient)) %>% write.csv("csvFiles/cluster_correlations.csv", row.names = FALSE, quote = FALSE)
+
+
+
+
+
+```
+
+
+
+
+
